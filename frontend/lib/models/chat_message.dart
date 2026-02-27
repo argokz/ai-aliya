@@ -14,4 +14,18 @@ class ChatMessage {
   final String? emotion;
 
   bool get isUser => role == ChatRole.user;
+  
+  ChatMessage copyWith({
+    ChatRole? role,
+    String? text,
+    String? audioUrl,
+    String? emotion,
+  }) {
+    return ChatMessage(
+      role: role ?? this.role,
+      text: text ?? this.text,
+      audioUrl: audioUrl ?? this.audioUrl,
+      emotion: emotion ?? this.emotion,
+    );
+  }
 }
