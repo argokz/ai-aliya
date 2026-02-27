@@ -30,7 +30,7 @@ class ApiClient {
   ApiClient({http.Client? client, String? baseUrl})
       : _client = client ?? http.Client(),
         _baseUrl =
-            baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:8000/api/v1');
+            baseUrl ?? const String.fromEnvironment('API_BASE_URL', defaultValue: 'https://itwin.kz/api-aliya/api/v1');
 
   final http.Client _client;
   final String _baseUrl;
