@@ -1,7 +1,5 @@
-import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -312,6 +310,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     final micPermission = await Permission.microphone.request();
+    if (!mounted) return;
     if (!micPermission.isGranted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Разрешите доступ к микрофону')),
@@ -320,6 +319,7 @@ class _ChatScreenState extends State<ChatScreen> {
     }
 
     bool speechAvailable = await _speech.initialize();
+    if (!mounted) return;
     if (!speechAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Распознавание речи недоступно')),
@@ -348,8 +348,6 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -398,7 +396,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       children: [
                         Container(color: Colors.black),
                         if (_cameraReady && cameraController != null)
-                          const Opacity(
+                          Opacity(
                             opacity: 0.0,
                             child: CameraPreview(cameraController),
                           ),
