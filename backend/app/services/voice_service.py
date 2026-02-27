@@ -298,14 +298,22 @@ class VoiceService:
     async def _synthesize_qwen_local(self, text: str, reference_audio: Path, language: str, output_path: Path) -> None:
         tts = self._get_qwen_tts()
         import soundfile as sf
+        import numpy as np
         
         def _local_gen():
-            audio, sample_rate = tts.generate(
+            audio_list, sample_rate = tts.generate_voice_clone(
                 text=text,
-                speaker_wav=str(reference_audio),
-                language=language
+                language=language,
+                ref_audio=str(reference_audio),
+                x_vector_only_mode=True
             )
-            sf.write(str(output_path), audio, sample_rate)
+            
+            if isinstance(audio_list, list) and len(audio_list) > 0:
+                full_audio = np.concatenate(audio_list)
+            else:
+                full_audio = audio_list
+
+            sf.write(str(output_path), full_audio, sample_rate)
             
         await asyncio.to_thread(_local_gen)
 
