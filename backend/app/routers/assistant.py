@@ -139,6 +139,11 @@ async def chat_stream(
             # Use voice narration if available, otherwise fallback to display text
             text_for_synthesis = voice_narration if voice_narration else display_text
 
+            # Pronunciation Fix: Ensure correct stress on 'Алия' -> 'АлиЯ'
+            # Note: Many TTS models (like Qwen-TTS) benefit from case-based or explicit markers.
+            # Here we use the user's suggestion of capitalized 'Я'.
+            text_for_synthesis = text_for_synthesis.replace("Алия", "АлиЯ").replace("алия", "алиЯ")
+
             # Once text is finished, detect emotion and synthesize audio
             emotion = emotion_service.detect(user_text=payload.text, assistant_text=display_text)
             yield json.dumps({"type": "emotion", "content": emotion}) + "\n"

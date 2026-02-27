@@ -34,6 +34,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _hasFace = false;
   String _emotion = 'neutral';
   String? _partialTranscript; // For real-time feedback
+  bool _isPlaying = false; // For "Aliya is speaking" status
+  String? _lastAudioUrl; // For replay button
 
   @override
   void initState() {
@@ -45,6 +47,14 @@ class _ChatScreenState extends State<ChatScreen> {
     _gazeService.hasFace.addListener(_onFaceChanged);
     
     // Trigger greeting once everything is ready
+    _audioPlayer.onPlayerStateChanged.listen((state) {
+      if (mounted) {
+        setState(() {
+          _isPlaying = state == PlayerState.playing;
+        });
+      }
+    });
+
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await Future.delayed(const Duration(milliseconds: 1000)); // Wait for UI to settle
       _sendGreeting();
@@ -80,6 +90,7 @@ class _ChatScreenState extends State<ChatScreen> {
         
         if (audioUrl != null) {
           debugPrint('Greeting Audio URL: $audioUrl');
+          _lastAudioUrl = audioUrl;
           await _audioPlayer.play(UrlSource(audioUrl));
         }
       }
@@ -116,23 +127,33 @@ class _ChatScreenState extends State<ChatScreen> {
         onResult: (result) {
           final words = result.recognizedWords.toLowerCase();
           
-          setState(() {
-            _partialTranscript = result.recognizedWords;
-          });
+          if (mounted) {
+            setState(() {
+              _partialTranscript = result.recognizedWords;
+            });
+          }
 
-          if (words.contains('алия')) {
-            debugPrint('Wake word "Алия" detected in results: "$words"');
+          // More robust wake word detection
+          // Matches 'алия', 'аллия', 'алея' etc. via simple fuzzy check or multiple variants
+          final wakeWordVariants = ['алия', 'аллия', 'алея', 'алияя', 'олия'];
+          bool detected = wakeWordVariants.any((v) => words.contains(v));
+
+          if (detected) {
+            debugPrint('Wake word detected in results: "$words"');
             
-            if (result.finalResult) {
+            // If we detected the wake word, we can stop listening and process the full query
+            if (result.finalResult || words.length > 10) {
               _sendRecognizedText(result.recognizedWords);
-              setState(() => _partialTranscript = null);
+              if (mounted) setState(() => _partialTranscript = null);
+              _speech.stop();
             }
           }
         },
         listenOptions: SpeechListenOptions(
           cancelOnError: false,
           partialResults: true,
-          listenMode: ListenMode.confirmation,
+          listenMode: ListenMode.dictation, // Dictation is better for continuous listening
+          autoPunctuation: true,
         ),
       );
     }
@@ -270,6 +291,7 @@ class _ChatScreenState extends State<ChatScreen> {
         } else if (type == 'audio' && content is String) {
           final audioUrl = _apiClient.resolveAudioUrl(content);
           debugPrint('Streamed Audio URL: $audioUrl');
+          _lastAudioUrl = audioUrl;
           await _audioPlayer.play(UrlSource(audioUrl));
         } else if (type == 'error') {
           setState(() {
@@ -440,7 +462,41 @@ class _ChatScreenState extends State<ChatScreen> {
                             hasFace: _hasFace,
                           ),
                         ),
-                        if (!_isLoading && !_isRecording)
+                        if (_isLoading)
+                          Positioned(
+                            bottom: 10,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Text(
+                                'Алия думает...',
+                                style: TextStyle(
+                                  color: const Color(0xFFFF8A00).withValues(alpha: 0.8),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (_isPlaying)
+                          Positioned(
+                            bottom: 10,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Text(
+                                'Алия говорит...',
+                                style: TextStyle(
+                                  color: const Color(0xFF64FFDA).withValues(alpha: 0.8),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (!_isLoading && !_isRecording && !_isPlaying)
                           Positioned(
                             bottom: 10,
                             right: 15,
@@ -497,7 +553,9 @@ class _ChatScreenState extends State<ChatScreen> {
                       child: Container(
                         margin: const EdgeInsets.symmetric(vertical: 6),
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        constraints: const BoxConstraints(maxWidth: 320),
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.9,
+                        ),
                         decoration: BoxDecoration(
                           color: isUser ? const Color(0xFF2E1700) : const Color(0xFF151515),
                           borderRadius: BorderRadius.circular(16),
@@ -507,13 +565,36 @@ class _ChatScreenState extends State<ChatScreen> {
                                 : Colors.orange.shade200.withValues(alpha: 0.3),
                           ),
                         ),
-                        child: Text(
-                          message.text,
-                          style: TextStyle(
-                            color: isUser ? const Color(0xFFFFBB73) : Colors.white,
-                            fontSize: 15,
-                            height: 1.35,
-                          ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              message.text,
+                              style: TextStyle(
+                                color: isUser ? const Color(0xFFFFBB73) : Colors.white,
+                                fontSize: 15,
+                                height: 1.35,
+                              ),
+                            ),
+                            if (!isUser && index == 0 && _lastAudioUrl != null)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: InkWell(
+                                  onTap: () => _audioPlayer.play(UrlSource(_lastAudioUrl!)),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.replay, size: 16, color: Colors.orange.shade300),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Повторить аудио',
+                                        style: TextStyle(fontSize: 12, color: Colors.orange.shade300),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     );

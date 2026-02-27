@@ -123,15 +123,16 @@ class _EyePainter extends CustomPainter {
   }
 
   void _drawEye(Canvas canvas, Offset center, double eyeHeight) {
-    const eyeWidth = 108.0;
+    // Draw the eye shell
+    const eyeWidth = 118.0; // Increased width
     final eyeRect = Rect.fromCenter(center: center, width: eyeWidth, height: eyeHeight);
-    final eyeRRect = RRect.fromRectAndRadius(eyeRect, const Radius.circular(42));
+    final eyeRRect = RRect.fromRectAndRadius(eyeRect, const Radius.circular(46)); // Softer curve
 
     final shellPaint = Paint()
       ..shader = LinearGradient(
         colors: [
-          Colors.orange.shade100.withValues(alpha: 0.95),
-          Colors.orange.shade50,
+          Colors.orange.shade100.withValues(alpha: 0.98),
+          Colors.orange.shade50.withValues(alpha: 0.9),
         ],
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
@@ -139,12 +140,14 @@ class _EyePainter extends CustomPainter {
 
     canvas.drawRRect(eyeRRect, shellPaint);
 
-    const pupilRangeX = 20.0;
-    final pupilRangeY = max(6.0, eyeHeight * 0.18);
+    // Pupil ranges
+    const pupilRangeX = 24.0; // wider range
+    final pupilRangeY = max(8.0, eyeHeight * 0.2);
 
     final emotionX = switch (emotion) {
-      'thinking' => -4.0,
-      'surprised' => 3.0,
+      'thinking' => -6.0,
+      'surprised' => 4.0,
+      'happy' => 2.0,
       _ => 0.0,
     };
 
@@ -153,14 +156,29 @@ class _EyePainter extends CustomPainter {
       center.dy + (gaze.dy * pupilRangeY),
     );
 
-    final irisPaint = Paint()..color = const Color(0xFFFF8A00);
-    canvas.drawCircle(pupilCenter, 24, irisPaint);
+    // SMARTER BROWN EYES
+    // 1. Outer Iris (Brown)
+    final irisPaint = Paint()..color = const Color(0xFF5D4037); // Deep Hazel/Brown
+    canvas.drawCircle(pupilCenter, 28, irisPaint);
 
+    // 2. Iris Texture/Ring
+    final ringPaint = Paint()
+      ..color = const Color(0xFF795548).withValues(alpha: 0.6)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3;
+    canvas.drawCircle(pupilCenter, 20, ringPaint);
+
+    // 3. Pupil (Black)
     final pupilPaint = Paint()..color = const Color(0xFF1B0F00);
-    canvas.drawCircle(pupilCenter, 10, pupilPaint);
+    canvas.drawCircle(pupilCenter, 12, pupilPaint);
 
-    final glarePaint = Paint()..color = Colors.white.withValues(alpha: 0.82);
-    canvas.drawCircle(pupilCenter.translate(-6, -7), 4, glarePaint);
+    // 4. Primary Glare
+    final glarePaint = Paint()..color = Colors.white.withValues(alpha: 0.88);
+    canvas.drawCircle(pupilCenter.translate(-7, -8), 5, glarePaint);
+    
+    // 5. Secondary "Smart" Glare
+    final smallGlarePaint = Paint()..color = Colors.white.withValues(alpha: 0.4);
+    canvas.drawCircle(pupilCenter.translate(9, 6), 2, smallGlarePaint);
 
     if (emotion == 'sad' || emotion == 'empathetic') {
       final eyelidPaint = Paint()
