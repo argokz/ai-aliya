@@ -96,25 +96,57 @@ async def chat_stream(
     emotion_service: EmotionService = Depends(get_emotion_service),
 ):
     async def stream_generator():
-        full_text = ""
+        full_output = ""
+        display_text = ""
+        voice_narration = ""
+        in_voice_mode = False
+        voice_tag = "<voice>"
+        
         try:
             async for chunk in llm_service.generate_reply_stream(
                 user_text=payload.text,
                 history=payload.history
             ):
-                full_text += chunk
-                # Yield text chunk to frontend immediately
-                yield json.dumps({"type": "text", "content": chunk}) + "\n"
+                full_output += chunk
+                
+                if not in_voice_mode:
+                    if voice_tag in full_output:
+                        # Found the boundary
+                        in_voice_mode = True
+                        parts = full_output.split(voice_tag)
+                        
+                        # The part before the tag is the final bit of display text
+                        # But we only want to yield what hasn't been yielded yet
+                        # Actually, simplified approach: just track what we've sent
+                        new_display = parts[0][len(display_text):]
+                        if new_display:
+                            yield json.dumps({"type": "text", "content": new_display}) + "\n"
+                            display_text += new_display
+                        
+                        # Start collecting voice from after the tag
+                        voice_narration = parts[1]
+                    else:
+                        # Still in normal text mode
+                        yield json.dumps({"type": "text", "content": chunk}) + "\n"
+                        display_text += chunk
+                else:
+                    # In voice mode, just collect
+                    voice_narration += chunk
+
+            # Cleanup voice narration (remove closing tag)
+            voice_narration = voice_narration.replace("</voice>", "").strip()
+            
+            # Use voice narration if available, otherwise fallback to display text
+            text_for_synthesis = voice_narration if voice_narration else display_text
 
             # Once text is finished, detect emotion and synthesize audio
-            emotion = emotion_service.detect(user_text=payload.text, assistant_text=full_text)
+            emotion = emotion_service.detect(user_text=payload.text, assistant_text=display_text)
             yield json.dumps({"type": "emotion", "content": emotion}) + "\n"
 
             if payload.generate_audio and payload.speaker_id:
                 try:
-                    # Note: GPT has added '|' separators which voice_service or worker can handle
                     audio_path = await voice_service.synthesize(
-                        text=full_text,
+                        text=text_for_synthesis,
                         speaker_id=payload.speaker_id,
                         language=payload.language,
                     )
