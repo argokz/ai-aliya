@@ -128,6 +128,7 @@ class VoiceService:
                 
                 try:
                     if self.settings.use_remote_worker and self.settings.qwen_worker_url:
+                        print(f"Attempting remote Qwen synthesis for text: {text[:30]}... [lang={language}]")
                         await self._synthesize_qwen_remote(text, reference_audio, language, output_path)
                         return output_path
                 except Exception as e:
@@ -300,9 +301,7 @@ class VoiceService:
         import soundfile as sf
         import numpy as np
         
-        # Normalize language codes
-        lang_map = {"ru": "russian", "en": "english"}
-        normalized_lang = lang_map.get(language.lower(), language.lower())
+        normalized_lang = self._normalize_qwen_language(language)
 
         def _local_gen():
             audio_list, sample_rate = tts.generate_voice_clone(
@@ -324,14 +323,32 @@ class VoiceService:
     async def _synthesize_qwen_remote(self, text: str, reference_audio: Path, language: str, output_path: Path) -> None:
         import httpx
         url = f"{self.settings.qwen_worker_url}/synthesize"
+        normalized_lang = self._normalize_qwen_language(language)
         
         async with httpx.AsyncClient(timeout=120.0) as client:
             with reference_audio.open("rb") as f:
                 files = {"reference_audio": (reference_audio.name, f, "audio/wav")}
-                data = {"text": text, "language": language}
+                data = {"text": text, "language": normalized_lang}
                 response = await client.post(url, data=data, files=files)
                 
             if response.status_code != 200:
                 raise RuntimeError(f"Worker synthesis failed: {response.text}")
                 
             output_path.write_bytes(response.content)
+    def _normalize_qwen_language(self, language: str) -> str:
+        # Take the base language (e.g., 'ru-RU' -> 'ru')
+        base_lang = language.lower().split("-")[0].split("_")[0]
+        
+        lang_map = {
+            "ru": "russian",
+            "en": "english",
+            "zh": "chinese",
+            "de": "german",
+            "ja": "japanese",
+            "ko": "korean",
+            "es": "spanish",
+            "fr": "french",
+            "it": "italian",
+            "pt": "portuguese"
+        }
+        return lang_map.get(base_lang, base_lang)

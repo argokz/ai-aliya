@@ -77,12 +77,22 @@ class LLMService:
 
         client = self._get_openai_client()
         
+        # Reasoning models (o1, o3, etc) and gpt-5 do not support temperature < 1.0 or at all
+        model = self.settings.openai_model
+        kwargs = {
+            "model": model,
+            "messages": messages,
+        }
+        
+        # Only add temperature if it's not a reasoning model
+        is_reasoning = model.startswith("o1") or model.startswith("o3") or "gpt-5" in model
+        if not is_reasoning:
+            kwargs["temperature"] = self.settings.openai_temperature
+            
         # OpenAI SDK call
         response = await asyncio.to_thread(
             client.chat.completions.create,
-            model=self.settings.openai_model,
-            messages=messages,
-            temperature=0.7,
+            **kwargs
         )
         
         content = response.choices[0].message.content
