@@ -16,7 +16,7 @@ def test_remote_synthesis():
     try:
         with ref_audio.open("rb") as f:
             files = {"reference_audio": (ref_audio.name, f, "audio/wav")}
-            data = {"text": text, "language": "ru"}
+            data = {"text": text, "language": "russian"}
             
             response = httpx.post(
                 f"{worker_url}/synthesize", 

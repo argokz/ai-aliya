@@ -300,10 +300,14 @@ class VoiceService:
         import soundfile as sf
         import numpy as np
         
+        # Normalize language codes
+        lang_map = {"ru": "russian", "en": "english"}
+        normalized_lang = lang_map.get(language.lower(), language.lower())
+
         def _local_gen():
             audio_list, sample_rate = tts.generate_voice_clone(
                 text=text,
-                language=language,
+                language=normalized_lang,
                 ref_audio=str(reference_audio),
                 x_vector_only_mode=True
             )

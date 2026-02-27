@@ -36,10 +36,25 @@ async def startup_event():
 @app.post("/synthesize")
 async def synthesize(
     text: str = Form(...),
-    language: str = Form("ru"),
+    language: str = Form("russian"),
     reference_audio: UploadFile = File(...)
 ):
     try:
+        # Normalize language codes (e.g., 'ru' -> 'russian')
+        lang_map = {
+            "ru": "russian",
+            "en": "english",
+            "zh": "chinese",
+            "de": "german",
+            "ja": "japanese",
+            "ko": "korean",
+            "es": "spanish",
+            "fr": "french",
+            "it": "italian",
+            "pt": "portuguese"
+        }
+        normalized_lang = lang_map.get(language.lower(), language.lower())
+        
         # Create temp dir for processing
         temp_dir = Path("temp_worker")
         temp_dir.mkdir(exist_ok=True)
@@ -60,7 +75,7 @@ async def synthesize(
         # generate_voice_clone returns Tuple[List[np.ndarray], int]
         audio_list, sample_rate = tts.generate_voice_clone(
             text=text,
-            language=language,
+            language=normalized_lang,
             ref_audio=str(ref_path),
             x_vector_only_mode=True
         )
