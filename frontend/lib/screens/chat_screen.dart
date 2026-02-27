@@ -207,58 +207,73 @@ class _ChatScreenState extends State<ChatScreen> {
     }).toList();
   }
 
-  Future<void> _sendText() async {
-    final text = _textController.text.trim();
-    if (text.isEmpty || _isLoading) {
-      return;
-    }
+  Future<void> _processStreamingReply(String text) async {
+    if (text.isEmpty || _isLoading) return;
 
     setState(() {
-      _messages.add(ChatMessage(role: ChatRole.user, text: text));
       _isLoading = true;
-      _textController.clear();
       _partialTranscript = null;
     });
 
+    final assistantMsg = ChatMessage(
+      role: ChatRole.assistant,
+      text: '',
+      emotion: 'neutral',
+    );
+
+    setState(() {
+      _messages.add(assistantMsg);
+    });
+
+    final msgIndex = _messages.length - 1;
+    String accumulatedText = '';
+
     try {
-      final reply = await _apiClient.sendText(
+      final stream = _apiClient.sendStreamedChat(
         text: text,
         language: 'ru',
         speakerId: _speakerIdController.text.trim(),
         history: _historyPayload(),
       );
 
-      final audioUrl = reply.audioUrl == null
-          ? null
-          : _apiClient.resolveAudioUrl(reply.audioUrl!);
+      await for (final event in stream) {
+        if (!mounted) break;
 
-      if (mounted) {
-        setState(() {
-          _emotion = reply.emotion;
-          _messages.add(
-            ChatMessage(
-              role: ChatRole.assistant,
-              text: reply.assistantText,
-              audioUrl: audioUrl,
-              emotion: reply.emotion,
-            ),
-          );
-        });
+        final type = event['type'] as String?;
+        final content = event['content'];
 
-        if (audioUrl != null) {
-          debugPrint('Manual Message Audio URL: $audioUrl');
+        if (type == 'text' && content is String) {
+          accumulatedText += content;
+          // Filter out logical splitting character '|' for clean UI
+          final displayText = accumulatedText.replaceAll('|', '');
+          setState(() {
+            _messages[msgIndex] = _messages[msgIndex].copyWith(text: displayText);
+          });
+        } else if (type == 'emotion' && content is String) {
+          setState(() {
+            _emotion = content;
+            _messages[msgIndex] = _messages[msgIndex].copyWith(emotion: content);
+          });
+        } else if (type == 'audio' && content is String) {
+          final audioUrl = _apiClient.resolveAudioUrl(content);
+          debugPrint('Streamed Audio URL: $audioUrl');
           await _audioPlayer.play(UrlSource(audioUrl));
+        } else if (type == 'error') {
+          setState(() {
+            _messages[msgIndex] = _messages[msgIndex].copyWith(
+              text: 'Ошибка: $content',
+              emotion: 'sad',
+            );
+            _emotion = 'sad';
+          });
         }
       }
-    } catch (error) {
+    } catch (e) {
       if (mounted) {
         setState(() {
-          _messages.add(
-            ChatMessage(
-              role: ChatRole.assistant,
-              text: 'Ошибка: $error',
-              emotion: 'sad',
-            ),
+          _messages[msgIndex] = _messages[msgIndex].copyWith(
+            text: 'Ошибка связи: $e',
+            emotion: 'sad',
           );
           _emotion = 'sad';
         });
@@ -272,6 +287,20 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  Future<void> _sendText() async {
+    final text = _textController.text.trim();
+    if (text.isEmpty || _isLoading) {
+      return;
+    }
+
+    setState(() {
+      _messages.add(ChatMessage(role: ChatRole.user, text: text));
+      _textController.clear();
+    });
+
+    await _processStreamingReply(text);
+  }
+
   Future<void> _sendRecognizedText(String text) async {
     if (text.isEmpty || _isLoading) {
       return;
@@ -279,60 +308,9 @@ class _ChatScreenState extends State<ChatScreen> {
 
     setState(() {
       _messages.add(ChatMessage(role: ChatRole.user, text: text));
-      _isLoading = true;
-      _partialTranscript = null;
     });
 
-    try {
-      final reply = await _apiClient.sendText(
-        text: text,
-        language: 'ru',
-        speakerId: _speakerIdController.text.trim(),
-        history: _historyPayload(),
-      );
-
-      final audioUrl = reply.audioUrl == null
-          ? null
-          : _apiClient.resolveAudioUrl(reply.audioUrl!);
-
-      if (mounted) {
-        setState(() {
-          _emotion = reply.emotion;
-          _messages.add(
-            ChatMessage(
-              role: ChatRole.assistant,
-              text: reply.assistantText,
-              audioUrl: audioUrl,
-              emotion: reply.emotion,
-            ),
-          );
-        });
-
-        if (audioUrl != null) {
-          debugPrint('Voice Recognition Audio URL: $audioUrl');
-          await _audioPlayer.play(UrlSource(audioUrl));
-        }
-      }
-    } catch (error) {
-      if (mounted) {
-        setState(() {
-          _messages.add(
-            ChatMessage(
-              role: ChatRole.assistant,
-              text: 'Ошибка: $error',
-              emotion: 'sad',
-            ),
-          );
-          _emotion = 'sad';
-        });
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
-    }
+    await _processStreamingReply(text);
   }
 
   Future<void> _toggleRecording() async {

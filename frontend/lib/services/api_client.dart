@@ -63,6 +63,47 @@ class ApiClient {
     );
   }
 
+  Stream<Map<String, dynamic>> sendStreamedChat({
+    required String text,
+    required String language,
+    String? speakerId,
+    bool generateAudio = true,
+    List<Map<String, String>> history = const [],
+  }) async* {
+    final request = http.Request(
+      'POST',
+      Uri.parse('$_baseUrl/assistant/chat-stream'),
+    );
+    request.headers['Content-Type'] = 'application/json';
+    request.body = jsonEncode({
+      'text': text,
+      'language': language,
+      'speaker_id': speakerId,
+      'generate_audio': generateAudio,
+      'history': history,
+    });
+
+    final streamedResponse = await _client.send(request);
+
+    if (streamedResponse.statusCode >= 400) {
+        final body = await streamedResponse.stream.bytesToString();
+        throw Exception(_extractError(body));
+    }
+
+    final stream = streamedResponse.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+
+    await for (final line in stream) {
+      if (line.trim().isEmpty) continue;
+      try {
+        yield jsonDecode(line) as Map<String, dynamic>;
+      } catch (e) {
+        print('Error decoding stream line: $e');
+      }
+    }
+  }
+
   Future<AssistantReply> sendAudio({
     required File audioFile,
     required String language,
