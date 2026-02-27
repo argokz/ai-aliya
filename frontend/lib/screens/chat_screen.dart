@@ -244,11 +244,17 @@ class _ChatScreenState extends State<ChatScreen> {
 
         if (type == 'text' && content is String) {
           accumulatedText += content;
-          // Filter out logical splitting character '|' for clean UI
-          final displayText = accumulatedText.replaceAll('|', '');
-          setState(() {
-            _messages[msgIndex] = _messages[msgIndex].copyWith(text: displayText);
-          });
+          // Filter out logical splitting character '|' and any stray <voice> tags for clean UI
+          final displayText = accumulatedText
+              .replaceAll('|', '')
+              .replaceAll(RegExp(r'<voice>.*', dotAll: true), '')
+              .trim();
+          
+          if (displayText != _messages[msgIndex].text) {
+            setState(() {
+              _messages[msgIndex] = _messages[msgIndex].copyWith(text: displayText);
+            });
+          }
         } else if (type == 'emotion' && content is String) {
           setState(() {
             _emotion = content;
