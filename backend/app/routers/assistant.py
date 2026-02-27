@@ -139,9 +139,6 @@ async def chat_stream(
             # Use voice narration if available, otherwise fallback to display text
             text_for_synthesis = voice_narration if voice_narration else display_text
 
-
-            # Once text is finished, detect emotion and synthesize audio
-
             # Once text is finished, detect emotion and synthesize audio
             emotion = emotion_service.detect(user_text=payload.text, assistant_text=display_text)
             yield json.dumps({"type": "emotion", "content": emotion}) + "\n"

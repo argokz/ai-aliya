@@ -36,6 +36,7 @@ class _ChatScreenState extends State<ChatScreen> {
   String? _partialTranscript; // For real-time feedback
   bool _isPlaying = false; // For "Aliya is speaking" status
   String? _lastAudioUrl; // For replay button
+  bool _isActivated = false; // Brief "ping" when wake word heard
 
   @override
   void initState() {
@@ -141,6 +142,22 @@ class _ChatScreenState extends State<ChatScreen> {
           if (detected) {
             debugPrint('Wake word detected in results: "$words"');
             
+            if (!_isActivated && mounted) {
+              setState(() {
+                _isActivated = true;
+                _emotion = 'surprised';
+              });
+              // Reset emotion after a bit, unless it changes elsewhere
+              Future.delayed(const Duration(milliseconds: 800), () {
+                if (mounted && _isActivated) {
+                  setState(() {
+                    _isActivated = false;
+                    _emotion = 'neutral';
+                  });
+                }
+              });
+            }
+
             // If we detected the wake word, we can stop listening and process the full query
             if (result.finalResult || words.length > 10) {
               _sendRecognizedText(result.recognizedWords);
@@ -496,17 +513,37 @@ class _ChatScreenState extends State<ChatScreen> {
                               ),
                             ),
                           ),
-                        if (!_isLoading && !_isRecording && !_isPlaying)
+                        if (_isActivated)
                           Positioned(
                             bottom: 10,
-                            right: 15,
-                            child: Text(
-                              'Алия слушает...',
-                              style: TextStyle(
-                                color: const Color(0xFFFF8A00).withValues(alpha: 0.6),
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                letterSpacing: 0.5,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Text(
+                                'Я вас слушаю!',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.9),
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (!_isLoading && !_isRecording && !_isPlaying && !_isActivated)
+                          Positioned(
+                            bottom: 10,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Text(
+                                'Алия слушает...',
+                                style: TextStyle(
+                                  color: const Color(0xFFFF8A00).withValues(alpha: 0.6),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  letterSpacing: 0.5,
+                                ),
                               ),
                             ),
                           ),
