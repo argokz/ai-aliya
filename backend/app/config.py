@@ -62,14 +62,6 @@ class Settings(BaseSettings):
     whisper_worker_url: str = "http://100.115.128.128:8004"
     whisper_use_remote: bool = True
 
-    tts_mode: str = "aliya_xtts"
-    gemini_tts_model: str = "gemini-2.5-flash-preview-tts"
-    default_gemini_voice: str = "Gacrux"
-    reference_audio_paths: str = "audio_chunks/chunk_5.wav,audio_chunks/chunk_12.wav"
-    aliya_reference_audio: str = "audio_chunks/chunk_12.wav"
-    xtts_model_name: str = "tts_models/multilingual/multi-dataset/xtts_v2"
-    tts_use_gpu: bool = False
-
     cors_allow_origins: str = "*"
 
     model_config = SettingsConfigDict(

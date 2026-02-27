@@ -21,7 +21,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _messages = <ChatMessage>[];
   final _textController = TextEditingController();
-  final _speakerIdController = TextEditingController(text: 'default-user');
+  final _speakerIdController = TextEditingController(text: 'aliya');
   final _apiClient = ApiClient();
   final _gazeService = CameraGazeService();
   final _speech = SpeechToText();
@@ -33,6 +33,7 @@ class _ChatScreenState extends State<ChatScreen> {
   Offset _gaze = Offset.zero;
   bool _hasFace = false;
   String _emotion = 'neutral';
+  String? _partialTranscript; // For real-time feedback
 
   @override
   void initState() {
@@ -44,7 +45,8 @@ class _ChatScreenState extends State<ChatScreen> {
     _gazeService.hasFace.addListener(_onFaceChanged);
     
     // Trigger greeting once everything is ready
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await Future.delayed(const Duration(milliseconds: 1000)); // Wait for UI to settle
       _sendGreeting();
       _startWakeWordListener();
     });
@@ -54,7 +56,7 @@ class _ChatScreenState extends State<ChatScreen> {
     // Send a hidden greeting to get Aliya's introduction
     try {
       final reply = await _apiClient.sendText(
-        text: 'Привет, представься пожалуйста',
+        text: 'Алия, поздоровайся и коротко скажи, что ты готова помочь',
         language: 'ru',
         speakerId: _speakerIdController.text.trim(),
       );
@@ -77,6 +79,7 @@ class _ChatScreenState extends State<ChatScreen> {
         });
         
         if (audioUrl != null) {
+          debugPrint('Greeting Audio URL: $audioUrl');
           await _audioPlayer.play(UrlSource(audioUrl));
         }
       }
@@ -86,19 +89,43 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _startWakeWordListener() async {
-    bool available = await _speech.initialize();
-    if (available) {
+    if (_isRecording || _isLoading) return;
+
+    bool available = await _speech.initialize(
+      onStatus: (status) {
+        debugPrint('STT Status: $status');
+        if (status == 'done' || status == 'notListening') {
+          // Restart listener if not manually recording or loading
+          if (!_isRecording && !_isLoading && mounted) {
+            _startWakeWordListener();
+          }
+        }
+      },
+      onError: (error) {
+        debugPrint('STT Error: $error');
+        // Retry after error
+        if (mounted) {
+           Future.delayed(const Duration(seconds: 2), _startWakeWordListener);
+        }
+      },
+    );
+
+    if (available && mounted) {
       _speech.listen(
         localeId: 'ru-RU',
         onResult: (result) {
           final words = result.recognizedWords.toLowerCase();
+          
+          setState(() {
+            _partialTranscript = result.recognizedWords;
+          });
+
           if (words.contains('алия')) {
-            // Wake word detected! 
-            // We can either start recording or just act on the result if it contains a question
-            debugPrint('Wake word "Алия" detected!');
-            // If it's the final result and contains more than just the wake word, send it
-            if (result.finalResult && words.length > 5) {
-               _sendRecognizedText(result.recognizedWords);
+            debugPrint('Wake word "Алия" detected in results: "$words"');
+            
+            if (result.finalResult) {
+              _sendRecognizedText(result.recognizedWords);
+              setState(() => _partialTranscript = null);
             }
           }
         },
@@ -114,8 +141,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _initSpeech() async {
     try {
       await _speech.initialize(
-        onStatus: (status) => debugPrint('STT Status: $status'),
-        onError: (error) => debugPrint('STT Error: $error'),
+        onStatus: (status) => debugPrint('STT Init Status: $status'),
+        onError: (error) => debugPrint('STT Init Error: $error'),
       );
     } catch (e) {
       debugPrint('Speech initialization failed: $e');
@@ -190,6 +217,7 @@ class _ChatScreenState extends State<ChatScreen> {
       _messages.add(ChatMessage(role: ChatRole.user, text: text));
       _isLoading = true;
       _textController.clear();
+      _partialTranscript = null;
     });
 
     try {
@@ -204,32 +232,37 @@ class _ChatScreenState extends State<ChatScreen> {
           ? null
           : _apiClient.resolveAudioUrl(reply.audioUrl!);
 
-      setState(() {
-        _emotion = reply.emotion;
-        _messages.add(
-          ChatMessage(
-            role: ChatRole.assistant,
-            text: reply.assistantText,
-            audioUrl: audioUrl,
-            emotion: reply.emotion,
-          ),
-        );
-      });
+      if (mounted) {
+        setState(() {
+          _emotion = reply.emotion;
+          _messages.add(
+            ChatMessage(
+              role: ChatRole.assistant,
+              text: reply.assistantText,
+              audioUrl: audioUrl,
+              emotion: reply.emotion,
+            ),
+          );
+        });
 
-      if (audioUrl != null) {
-        await _audioPlayer.play(UrlSource(audioUrl));
+        if (audioUrl != null) {
+          debugPrint('Manual Message Audio URL: $audioUrl');
+          await _audioPlayer.play(UrlSource(audioUrl));
+        }
       }
     } catch (error) {
-      setState(() {
-        _messages.add(
-          ChatMessage(
-            role: ChatRole.assistant,
-            text: 'Ошибка: $error',
-            emotion: 'sad',
-          ),
-        );
-        _emotion = 'sad';
-      });
+      if (mounted) {
+        setState(() {
+          _messages.add(
+            ChatMessage(
+              role: ChatRole.assistant,
+              text: 'Ошибка: $error',
+              emotion: 'sad',
+            ),
+          );
+          _emotion = 'sad';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -247,6 +280,7 @@ class _ChatScreenState extends State<ChatScreen> {
     setState(() {
       _messages.add(ChatMessage(role: ChatRole.user, text: text));
       _isLoading = true;
+      _partialTranscript = null;
     });
 
     try {
@@ -261,32 +295,37 @@ class _ChatScreenState extends State<ChatScreen> {
           ? null
           : _apiClient.resolveAudioUrl(reply.audioUrl!);
 
-      setState(() {
-        _emotion = reply.emotion;
-        _messages.add(
-          ChatMessage(
-            role: ChatRole.assistant,
-            text: reply.assistantText,
-            audioUrl: audioUrl,
-            emotion: reply.emotion,
-          ),
-        );
-      });
+      if (mounted) {
+        setState(() {
+          _emotion = reply.emotion;
+          _messages.add(
+            ChatMessage(
+              role: ChatRole.assistant,
+              text: reply.assistantText,
+              audioUrl: audioUrl,
+              emotion: reply.emotion,
+            ),
+          );
+        });
 
-      if (audioUrl != null) {
-        await _audioPlayer.play(UrlSource(audioUrl));
+        if (audioUrl != null) {
+          debugPrint('Voice Recognition Audio URL: $audioUrl');
+          await _audioPlayer.play(UrlSource(audioUrl));
+        }
       }
     } catch (error) {
-      setState(() {
-        _messages.add(
-          ChatMessage(
-            role: ChatRole.assistant,
-            text: 'Ошибка: $error',
-            emotion: 'sad',
-          ),
-        );
-        _emotion = 'sad';
-      });
+      if (mounted) {
+        setState(() {
+          _messages.add(
+            ChatMessage(
+              role: ChatRole.assistant,
+              text: 'Ошибка: $error',
+              emotion: 'sad',
+            ),
+          );
+          _emotion = 'sad';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -305,6 +344,7 @@ class _ChatScreenState extends State<ChatScreen> {
       await _speech.stop();
       setState(() {
         _isRecording = false;
+        _partialTranscript = null;
       });
       return;
     }
@@ -335,12 +375,14 @@ class _ChatScreenState extends State<ChatScreen> {
       localeId: 'ru-RU',
       onResult: (SpeechRecognitionResult result) {
         setState(() {
+          _partialTranscript = result.recognizedWords;
           _textController.text = result.recognizedWords;
         });
         
         if (result.finalResult) {
           setState(() {
             _isRecording = false;
+            _partialTranscript = null;
           });
           _sendRecognizedText(result.recognizedWords);
         }
@@ -372,7 +414,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   style: const TextStyle(color: Color(0xFFFFBB73)),
                   decoration: InputDecoration(
                     labelText: 'Speaker ID',
-                    hintText: 'например: user-1',
+                    hintText: 'например: aliya',
                     labelStyle: const TextStyle(color: Color(0xFFFF8A00)),
                     enabledBorder: OutlineInputBorder(
                       borderSide: BorderSide(color: Colors.orange.shade400),
@@ -407,6 +449,20 @@ class _ChatScreenState extends State<ChatScreen> {
                             hasFace: _hasFace,
                           ),
                         ),
+                        if (!_isLoading && !_isRecording)
+                          Positioned(
+                            bottom: 10,
+                            right: 15,
+                            child: Text(
+                              'Алия слушает...',
+                              style: TextStyle(
+                                color: const Color(0xFFFF8A00).withValues(alpha: 0.6),
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -417,9 +473,32 @@ class _ChatScreenState extends State<ChatScreen> {
                 child: ListView.builder(
                   reverse: true,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  itemCount: _messages.length,
+                  itemCount: _messages.length + (_partialTranscript != null ? 1 : 0),
                   itemBuilder: (context, index) {
-                    final message = _messages[_messages.length - 1 - index];
+                    if (_partialTranscript != null && index == 0) {
+                      // Show partial results at the bottom
+                      return Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E1700).withValues(alpha: 0.5),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFFF8A00).withValues(alpha: 0.5)),
+                          ),
+                          child: Text(
+                            _partialTranscript!,
+                            style: const TextStyle(color: Color(0xFFFFBB73), fontStyle: FontStyle.italic),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final messageIndex = _partialTranscript != null ? index - 1 : index;
+                    if (messageIndex < 0 || messageIndex >= _messages.length) return const SizedBox();
+                    
+                    final message = _messages[_messages.length - 1 - messageIndex];
                     final isUser = message.isUser;
 
                     return Align(
@@ -486,7 +565,7 @@ class _ChatScreenState extends State<ChatScreen> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange),
                             )
                           : const Icon(Icons.send_rounded),
                     ),
