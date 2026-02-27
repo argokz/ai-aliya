@@ -5,6 +5,7 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import ValidationError
 
 from app.config import Settings
@@ -84,6 +85,52 @@ async def chat(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post("/chat-stream")
+async def chat_stream(
+    payload: ChatRequest,
+    settings: Settings = Depends(get_app_settings),
+    llm_service: LLMService = Depends(get_llm_service),
+    voice_service: VoiceService = Depends(get_voice_service),
+    emotion_service: EmotionService = Depends(get_emotion_service),
+):
+    async def stream_generator():
+        full_text = ""
+        try:
+            async for chunk in llm_service.generate_reply_stream(
+                user_text=payload.text,
+                history=payload.history
+            ):
+                full_text += chunk
+                # Yield text chunk to frontend immediately
+                yield json.dumps({"type": "text", "content": chunk}) + "\n"
+
+            # Once text is finished, detect emotion and synthesize audio
+            emotion = emotion_service.detect(user_text=payload.text, assistant_text=full_text)
+            yield json.dumps({"type": "emotion", "content": emotion}) + "\n"
+
+            if payload.generate_audio and payload.speaker_id:
+                try:
+                    # Note: GPT has added '|' separators which voice_service or worker can handle
+                    audio_path = await voice_service.synthesize(
+                        text=full_text,
+                        speaker_id=payload.speaker_id,
+                        language=payload.language,
+                    )
+                    audio_url = _build_audio_url(settings, audio_path)
+                    yield json.dumps({"type": "audio", "content": audio_url}) + "\n"
+                except Exception as e:
+                    print(f"Streaming audio synthesis failed: {e}")
+                    yield json.dumps({"type": "error", "content": "Audio synthesis failed"}) + "\n"
+
+            yield json.dumps({"type": "done"}) + "\n"
+
+        except Exception as e:
+            print(f"Stream error: {e}")
+            yield json.dumps({"type": "error", "content": str(e)}) + "\n"
+
+    return StreamingResponse(stream_generator(), media_type="application/x-ndjson")
 
 
 def _parse_history_json(history_json: str | None) -> list[ChatMessage]:

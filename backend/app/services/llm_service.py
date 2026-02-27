@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, AsyncGenerator
 import google.generativeai as genai
 from openai import OpenAI
 
@@ -47,8 +47,112 @@ class LLMService:
                 print(f"GPT failed: {e}. Falling back to Gemini...")
                 return await self._generate_gemini_with_failover(messages)
 
-        # If priority is gemini, just use the failover logic
         return await self._generate_gemini_with_failover(messages)
+
+    async def generate_reply_stream(
+        self,
+        user_text: str,
+        history: list[ChatMessage] | None = None,
+    ) -> AsyncGenerator[str, None]:
+        messages = [{"role": "system", "content": self.settings.system_prompt}]
+        if history:
+            messages.extend(m.model_dump() for m in history)
+        messages.append({"role": "user", "content": user_text})
+
+        if self.settings.ai_priority == "gpt":
+            try:
+                async for chunk in self._generate_openai_stream(messages):
+                    yield chunk
+                return
+            except Exception as e:
+                print(f"GPT stream failed: {e}. Falling back to Gemini...")
+                # Fallback to Gemini stream is complex with model iterations, just yield from failover
+                async for chunk in self._generate_gemini_stream_with_failover(messages):
+                    yield chunk
+                return
+
+        async for chunk in self._generate_gemini_stream_with_failover(messages):
+            yield chunk
+
+    async def _generate_gemini_stream_with_failover(self, messages: list[dict[str, str]]) -> AsyncGenerator[str, None]:
+        # Simple failover for streaming: try first model, if fails, try others
+        models = [m.strip() for m in self.settings.gemini_models.split(",") if m.strip()]
+        if self._working_gemini_model and self._working_gemini_model in models:
+            models.remove(self._working_gemini_model)
+            models.insert(0, self._working_gemini_model)
+
+        for model_name in models:
+            try:
+                # Test connectivity/first chunk? Just try-except the whole generator
+                async for chunk in self._generate_gemini_stream(messages, model_name):
+                    yield chunk
+                self._working_gemini_model = model_name
+                return
+            except Exception as e:
+                print(f"Gemini stream model {model_name} failed: {e}")
+                continue
+
+    async def _generate_openai_stream(self, messages: list[dict[str, str]]) -> AsyncGenerator[str, None]:
+        if not self.settings.openai_api_key:
+            raise RuntimeError("OPENAI_API_KEY is required")
+
+        client = self._get_openai_client()
+        model = self.settings.openai_model
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "stream": True
+        }
+        
+        is_reasoning = model.startswith("o1") or model.startswith("o3") or "gpt-5" in model
+        if not is_reasoning:
+            kwargs["temperature"] = self.settings.openai_temperature
+            
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            **kwargs
+        )
+        
+        for chunk in response:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+    async def _generate_gemini_stream(self, messages: list[dict[str, str]], model_name: str | None = None) -> AsyncGenerator[str, None]:
+        if not self.settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is required")
+
+        self._configure_genai()
+        model_name = model_name or self.settings.gemini_model or "gemini-2.0-flash"
+        model_name = model_name.replace("models/", "")
+        
+        google_messages = []
+        system_instruction = self.settings.system_prompt
+        
+        for msg in messages:
+            role = msg.get("role")
+            content = msg.get("content", "")
+            if role == "system":
+                system_instruction = content
+                continue
+            gemini_role = "model" if role == "assistant" else "user"
+            google_messages.append({"role": gemini_role, "parts": [content]})
+
+        model = genai.GenerativeModel(
+            model_name=model_name,
+            system_instruction=system_instruction
+        )
+        
+        # generate_content with stream=True returns a response object with an iterator
+        response = await asyncio.to_thread(
+            model.generate_content,
+            google_messages,
+            generation_config=genai.types.GenerationConfig(temperature=0.7),
+            stream=True
+        )
+        
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
 
     async def _generate_gemini_with_failover(self, messages: list[dict[str, str]]) -> str:
         # 1. Try last working model if exists
