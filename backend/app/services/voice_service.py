@@ -297,14 +297,17 @@ class VoiceService:
 
     async def _synthesize_qwen_local(self, text: str, reference_audio: Path, language: str, output_path: Path) -> None:
         tts = self._get_qwen_tts()
-        await asyncio.to_thread(
-            lambda: tts.tts_to_file(
+        import soundfile as sf
+        
+        def _local_gen():
+            audio, sample_rate = tts.generate(
                 text=text,
                 speaker_wav=str(reference_audio),
-                language=language,
-                file_path=str(output_path)
+                language=language
             )
-        )
+            sf.write(str(output_path), audio, sample_rate)
+            
+        await asyncio.to_thread(_local_gen)
 
     async def _synthesize_qwen_remote(self, text: str, reference_audio: Path, language: str, output_path: Path) -> None:
         import httpx

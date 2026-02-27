@@ -16,6 +16,7 @@ backend/data/voices/*
 .env
 backend/.env
 backend/venv
+backend/output
 
 # Flutter
 frontend/.dart_tool/
