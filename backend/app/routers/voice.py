@@ -13,8 +13,11 @@ async def enroll_voice(
     audio: UploadFile = File(...),
     voice_service: VoiceService = Depends(get_voice_service),
 ) -> VoiceEnrollResponse:
-    if audio.content_type and not audio.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Only audio files are allowed")
+    valid_types = ["audio/", "application/octet-stream"]
+    is_valid_type = not audio.content_type or any(audio.content_type.startswith(t) for t in valid_types)
+    
+    if not is_valid_type:
+        raise HTTPException(status_code=400, detail=f"Only audio files are allowed. Got: {audio.content_type}")
 
     data = await audio.read()
     if not data:

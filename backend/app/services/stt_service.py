@@ -35,7 +35,7 @@ class STTService:
     async def _transcribe_remote(self, audio_path: Path, language: str | None) -> str:
         async with httpx.AsyncClient(timeout=60.0) as client:
             with open(audio_path, "rb") as f:
-                files = {"audio": (audio_path.name, f, "audio/wav")}
+                files = {"file": (audio_path.name, f, "audio/wav")}
                 data = {"language": language} if language else {}
                 response = await client.post(
                     f"{self.settings.whisper_worker_url}/transcribe",

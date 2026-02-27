@@ -1,11 +1,12 @@
 import 'dart:io';
-
-import 'package:audioplayers/audioplayers.dart';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:record/record.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/chat_message.dart';
 import '../services/api_client.dart';
@@ -25,7 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _speakerIdController = TextEditingController(text: 'default-user');
   final _apiClient = ApiClient();
   final _gazeService = CameraGazeService();
-  final _recorder = AudioRecorder();
+  final _speech = SpeechToText();
   final _audioPlayer = AudioPlayer();
 
   bool _isLoading = false;
@@ -39,8 +40,88 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _initCamera();
+    _initSpeech();
+    WakelockPlus.enable();
     _gazeService.gaze.addListener(_onGazeChanged);
     _gazeService.hasFace.addListener(_onFaceChanged);
+    
+    // Trigger greeting once everything is ready
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _sendGreeting();
+      _startWakeWordListener();
+    });
+  }
+
+  Future<void> _sendGreeting() async {
+    // Send a hidden greeting to get Aliya's introduction
+    try {
+      final reply = await _apiClient.sendText(
+        text: 'Привет, представься пожалуйста',
+        language: 'ru',
+        speakerId: _speakerIdController.text.trim(),
+      );
+      
+      final audioUrl = reply.audioUrl == null
+          ? null
+          : _apiClient.resolveAudioUrl(reply.audioUrl!);
+
+      if (mounted) {
+        setState(() {
+          _messages.add(
+            ChatMessage(
+              role: ChatRole.assistant,
+              text: reply.assistantText,
+              audioUrl: audioUrl,
+              emotion: reply.emotion,
+            ),
+          );
+          _emotion = reply.emotion;
+        });
+        
+        if (audioUrl != null) {
+          await _audioPlayer.play(UrlSource(audioUrl));
+        }
+      }
+    } catch (e) {
+      debugPrint('Greeting failed: $e');
+    }
+  }
+
+  Future<void> _startWakeWordListener() async {
+    bool available = await _speech.initialize();
+    if (available) {
+      _speech.listen(
+        localeId: 'ru-RU',
+        onResult: (result) {
+          final words = result.recognizedWords.toLowerCase();
+          if (words.contains('алия')) {
+            // Wake word detected! 
+            // We can either start recording or just act on the result if it contains a question
+            debugPrint('Wake word "Алия" detected!');
+            // If it's the final result and contains more than just the wake word, send it
+            if (result.finalResult && words.length > 5) {
+               _sendRecognizedText(result.recognizedWords);
+            }
+          }
+        },
+        listenOptions: SpeechListenOptions(
+          cancelOnError: false,
+          partialResults: true,
+          listenMode: ListenMode.confirmation,
+        ),
+      );
+    }
+  }
+
+  Future<void> _initSpeech() async {
+    try {
+      await _speech.initialize(
+        onStatus: (status) => debugPrint('STT Status: $status'),
+        onError: (error) => debugPrint('STT Error: $error'),
+      );
+    } catch (e) {
+      debugPrint('Speech initialization failed: $e');
+    }
   }
 
   Future<void> _initCamera() async {
@@ -80,11 +161,11 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   void dispose() {
+    WakelockPlus.disable();
     _gazeService.gaze.removeListener(_onGazeChanged);
     _gazeService.hasFace.removeListener(_onFaceChanged);
     _gazeService.dispose();
     _apiClient.dispose();
-    _recorder.dispose();
     _audioPlayer.dispose();
     _textController.dispose();
     _speakerIdController.dispose();
@@ -160,59 +241,19 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  Future<void> _toggleRecording() async {
-    if (_isLoading) {
+  Future<void> _sendRecognizedText(String text) async {
+    if (text.isEmpty || _isLoading) {
       return;
     }
-
-    if (_isRecording) {
-      final path = await _recorder.stop();
-      setState(() {
-        _isRecording = false;
-      });
-
-      if (path != null) {
-        await _sendAudio(File(path));
-      }
-      return;
-    }
-
-    final micPermission = await Permission.microphone.request();
-    if (!micPermission.isGranted) {
-      return;
-    }
-
-    final hasRecordPermission = await _recorder.hasPermission();
-    if (!hasRecordPermission) {
-      return;
-    }
-
-    final tempDir = await getTemporaryDirectory();
-    final path =
-        '${tempDir.path}/voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
-
-    await _recorder.start(
-      const RecordConfig(
-        encoder: AudioEncoder.aacLc,
-        sampleRate: 16000,
-        bitRate: 128000,
-      ),
-      path: path,
-    );
 
     setState(() {
-      _isRecording = true;
-    });
-  }
-
-  Future<void> _sendAudio(File audioFile) async {
-    setState(() {
+      _messages.add(ChatMessage(role: ChatRole.user, text: text));
       _isLoading = true;
     });
 
     try {
-      final reply = await _apiClient.sendAudio(
-        audioFile: audioFile,
+      final reply = await _apiClient.sendText(
+        text: text,
         language: 'ru',
         speakerId: _speakerIdController.text.trim(),
         history: _historyPayload(),
@@ -224,9 +265,6 @@ class _ChatScreenState extends State<ChatScreen> {
 
       setState(() {
         _emotion = reply.emotion;
-        _messages.add(
-          ChatMessage(role: ChatRole.user, text: reply.userText),
-        );
         _messages.add(
           ChatMessage(
             role: ChatRole.assistant,
@@ -245,7 +283,7 @@ class _ChatScreenState extends State<ChatScreen> {
         _messages.add(
           ChatMessage(
             role: ChatRole.assistant,
-            text: 'Ошибка при обработке аудио: $error',
+            text: 'Ошибка: $error',
             emotion: 'sad',
           ),
         );
@@ -257,9 +295,59 @@ class _ChatScreenState extends State<ChatScreen> {
           _isLoading = false;
         });
       }
-      if (await audioFile.exists()) {
-        await audioFile.delete();
-      }
+    }
+  }
+
+  Future<void> _toggleRecording() async {
+    if (_isLoading) {
+      return;
+    }
+
+    if (_isRecording) {
+      await _speech.stop();
+      setState(() {
+        _isRecording = false;
+      });
+      return;
+    }
+
+    final micPermission = await Permission.microphone.request();
+    if (!micPermission.isGranted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Разрешите доступ к микрофону')),
+      );
+      return;
+    }
+
+    bool speechAvailable = await _speech.initialize();
+    if (!speechAvailable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Распознавание речи недоступно')),
+      );
+      return;
+    }
+
+    setState(() {
+      _isRecording = true;
+    });
+
+    await _speech.listen(
+      localeId: 'ru-RU',
+      onResult: (SpeechRecognitionResult result) {
+        setState(() {
+          _textController.text = result.recognizedWords;
+        });
+        
+        if (result.finalResult) {
+          setState(() {
+            _isRecording = false;
+          });
+          _sendRecognizedText(result.recognizedWords);
+        }
+      },
+    );
+  }
+
     }
   }
 
@@ -310,8 +398,8 @@ class _ChatScreenState extends State<ChatScreen> {
                       children: [
                         Container(color: Colors.black),
                         if (_cameraReady && cameraController != null)
-                          Opacity(
-                            opacity: 0.22,
+                          const Opacity(
+                            opacity: 0.0,
                             child: CameraPreview(cameraController),
                           ),
                         Center(

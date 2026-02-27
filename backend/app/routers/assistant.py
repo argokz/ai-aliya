@@ -115,8 +115,13 @@ async def transcribe_and_chat(
     voice_service: VoiceService = Depends(get_voice_service),
     emotion_service: EmotionService = Depends(get_emotion_service),
 ) -> AssistantTurnResponse:
-    if audio.content_type and not audio.content_type.startswith("audio/"):
-        raise HTTPException(status_code=400, detail="Only audio files are allowed")
+    # Relaxed validation: Allow if starts with audio/, is octet-stream, or has no type
+    # Many clients (Flutter/Mobile) might send application/octet-stream
+    valid_types = ["audio/", "application/octet-stream"]
+    is_valid_type = not audio.content_type or any(audio.content_type.startswith(t) for t in valid_types)
+    
+    if not is_valid_type:
+        raise HTTPException(status_code=400, detail=f"Only audio files are allowed. Got: {audio.content_type}")
 
     suffix = Path(audio.filename or "audio.wav").suffix or ".wav"
     temp_path = settings.uploads_dir / f"{uuid4().hex}{suffix}"

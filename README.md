@@ -155,3 +155,5 @@ curl -X POST "http://localhost:8000/api/v1/assistant/transcribe-and-chat" \
 3. Перенести тяжелые модели в отдельные worker-процессы.
 4. Добавить fallback-режимы при недоступности LLM/TTS.
 5. Добавить тесты API и e2e тесты Flutter.
+
+100.115.128.128
