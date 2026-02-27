@@ -114,6 +114,10 @@ class VoiceService:
         )
 
     async def synthesize(self, text: str, speaker_id: str, language: str) -> Path:
+        # Pronunciation Fix: Ensure correct stress on 'Алия' -> 'АлиЯ'
+        if speaker_id.lower() == "aliya":
+            text = text.replace("Алия", "АлиЯ").replace("алия", "алиЯ")
+
         if speaker_id.lower() == "aliya":
             if self.settings.tts_mode == "qwen_tts":
                 # Unified Qwen synthesis (Remote with Local Fallback)
