@@ -198,8 +198,15 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   List<Map<String, String>> _historyPayload() {
-    final start = _messages.length > 8 ? _messages.length - 8 : 0;
-    return _messages.sublist(start).map((message) {
+    // Current user text is sent separately, and the assistant reply is just starting.
+    // History should only contain past messages. Exclude the last two entries 
+    // (the current user turn and the empty assistant placeholder).
+    final historyMessages = _messages.length >= 2
+        ? _messages.take(_messages.length - 2).where((m) => m.text.isNotEmpty).toList()
+        : <ChatMessage>[];
+
+    final start = historyMessages.length > 10 ? historyMessages.length - 10 : 0;
+    return historyMessages.sublist(start).map((message) {
       return {
         'role': message.role == ChatRole.user ? 'user' : 'assistant',
         'content': message.text,
